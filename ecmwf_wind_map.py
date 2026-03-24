@@ -384,8 +384,9 @@ def encode_to_rgb(
     g = ((g + max_uv) / (2.0 * max_uv) * 255.0).astype(np.uint8)
 
     # --- B: wind speed magnitude ---
-    speed = np.sqrt(u ** 2 + v ** 2)
-    b = np.clip(speed / max_speed * 255.0, 0, 255).astype(np.uint8)
+    # speed = np.sqrt(u ** 2 + v ** 2)
+    # b = np.clip(speed / max_speed * 255.0, 0, 255).astype(np.uint8)
+    b = np.zeros(u.shape, dtype=np.uint8)
 
     return np.stack([r, g, b], axis=-1)   # (H, W, 3)
 
