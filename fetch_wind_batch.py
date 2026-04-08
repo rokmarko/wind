@@ -45,7 +45,7 @@ from pathlib import Path
 # ECMWF Open Data publishes a much sparser mandatory-level set.
 # GFS_LEVELS:   list[str] = ["10m", "1000", "975", "950", "925", "900", "850", "800", "750", "700", "650", "600", "500"]
 GFS_LEVELS:   list[str] = ["10m", "1000", "925", "850", "700", "600", "500"]
-ECMWF_LEVELS: list[str] = ["10m", "1000", "925", "850", "700", "600", "500"]
+ECMWF_LEVELS: list[str] = ["1000", "925", "850", "700", "600", "500"]
 STEPS:  list[int] = list(range(0, 25, 3))   # 0, 3, 6, … 24
 
 # Defaults (may be overridden by CLI args)
