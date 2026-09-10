@@ -14,6 +14,7 @@ Mapbox wind layers, or any other renderer.
 | `ecmwf_wind_map.py` | Download + encode → PNG |
 | `decode_wind_png.py` | Decode PNG back to m/s arrays + optional plot |
 | `opera_radar_map.py` | Fetch EUMETNET OPERA rain radar composite → colourised PNG |
+| `nesis_radar_png.py` | Reproject that PNG to the Nesis EU weather texture (EPSG:3857) |
 
 ---
 
@@ -25,6 +26,9 @@ pip install ecmwf-opendata cfgrib xarray scipy pillow numpy
 
 # For the OPERA rain radar module (opera_radar_map.py)
 pip install h5py requests
+
+# For the Nesis converter (nesis_radar_png.py)
+pip install pyproj
 
 # eccodes C library (required by cfgrib)
 # macOS
@@ -229,6 +233,77 @@ usage: opera_radar_map.py [-h] [--output OUTPUT] [--time TIME] [--scale SCALE]
   --min-dbz         Transparent below this reflectivity (default: 5.0 dBZ)
   --show-coverage   Tint in-coverage-but-dry pixels so the footprint is visible
   --list            List available timestamps and exit
+```
+
+---
+
+## Nesis EU weather texture
+
+`nesis_radar_png.py` reprojects the OPERA PNG into the fixed texture the Nesis
+`WeatherImageRenderer` expects. It reads the source's projection straight out of
+the PNG text chunks, so the two scripts chain with no arguments in between:
+
+```bash
+python opera_radar_map.py --output opera_dbzh.png
+python nesis_radar_png.py opera_dbzh.png --output nesis_weather.png
+```
+
+### What the target format is, and why
+
+Every requirement below comes from the Nesis sources rather than convention:
+
+| Property | Requirement | Where it comes from |
+|----------|-------------|---------------------|
+| Projection | **Spherical** Mercator, EPSG:3857 | `OGLSphereTriangulator.cpp` `Triangulate2()` computes `fY = log(tan(M_PI_4 + fLat/2))` — no eccentricity term |
+| Extent | W −14.618225054687514° E 45.314636273437486°<br>S 30.968189526345665° N 72.62025190354672° | `WeatherImageRenderer.cpp:57-58` |
+| Orientation | Row 0 = **north** edge | `Triangulate2` puts `v=0` at the south; `Update()` calls `QImage::mirrored()` |
+| Pixel grid | `u` linear in longitude, `v` linear in Mercator y, bbox corners on pixel **edges** | GL texture coords 0/1 sit on the texture's outer edges |
+| Format | 8-bit RGBA, **straight** (non-premultiplied) alpha | `Format_RGBA8888`; `Weather.fsh` does `vec4(color.rgb, color.a*glf_alpha)` |
+| Size | Free — `u`/`v` are normalised | Natural square-metre aspect is `w/h = 0.798832` |
+
+In EPSG:3857 metres the extent is
+`-1627293.369 … 5044402.235` x by `3628618.637 … 11980434.095` y.
+
+> **EPSG:3395 would be wrong.** Ellipsoidal Mercator puts the north edge 40 km
+> off at 72.6°N. So would EPSG:4326 — in plate carrée the latitude grid lines are
+> evenly spaced, whereas here they must widen toward the north.
+
+### Resampling
+
+The source is a 1 km grid and the target is roughly 3–4× coarser on the ground,
+so each output pixel takes the **strongest** of N×N sub-samples
+(`--supersample`, default 3) rather than a single nearest neighbour — the usual
+way radar products are reduced. At 1024 px wide this retains about 23 % more
+echo than plain nearest-neighbour.
+
+Sub-samples are ranked by position along the source's own colour ramp, which the
+converter reads from the `Colormap` text chunk. Only whole source pixels are ever
+copied, never blended, so the output contains exactly the ramp colours of the
+input — no invented intermediate hues, and no premultiplication.
+
+### Alpha bleeding
+
+Nesis filters the texture with `GL_LINEAR` and blends with straight alpha, so
+the RGB of a *transparent* texel still contributes along every echo edge. Left
+alone, the source's transparent pixels carry the bottom of the colour ramp and
+paint a cyan halo around each cell, and the out-of-grid fill is transparent black
+and would paint a dark one. The converter therefore dilates opaque colours two
+rings outwards into transparent pixels, leaving alpha at zero. `--no-bleed`
+disables it.
+
+### CLI reference
+
+```
+usage: nesis_radar_png.py [-h] [--output OUTPUT] [--width WIDTH]
+                          [--height HEIGHT] [--supersample SUPERSAMPLE]
+                          [--no-bleed] input
+
+  input           Input PNG from opera_radar_map.py
+  --output        Output PNG path                    (default: nesis_weather.png)
+  --width         Output width in pixels             (default: 1024)
+  --height        Output height in pixels            (default: width / 0.798832)
+  --supersample   Strongest of N×N sub-samples       (default: 3; 1 = nearest)
+  --no-bleed      Skip colour dilation into transparent pixels
 ```
 
 ---
