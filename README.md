@@ -15,6 +15,7 @@ Mapbox wind layers, or any other renderer.
 | `decode_wind_png.py` | Decode PNG back to m/s arrays + optional plot |
 | `opera_radar_map.py` | Fetch EUMETNET OPERA rain radar composite → colourised PNG |
 | `nesis_radar_png.py` | Reproject that PNG to the Nesis EU weather texture (EPSG:3857) |
+| `update_nesis_radar.sh` | Cron entry point: fetch → convert → publish atomically |
 
 ---
 
@@ -259,7 +260,7 @@ Every requirement below comes from the Nesis sources rather than convention:
 | Orientation | Row 0 = **north** edge | `Triangulate2` puts `v=0` at the south; `Update()` calls `QImage::mirrored()` |
 | Pixel grid | `u` linear in longitude, `v` linear in Mercator y, bbox corners on pixel **edges** | GL texture coords 0/1 sit on the texture's outer edges |
 | Format | 8-bit RGBA, **straight** (non-premultiplied) alpha | `Format_RGBA8888`; `Weather.fsh` does `vec4(color.rgb, color.a*glf_alpha)` |
-| Size | Free — `u`/`v` are normalised | Natural square-metre aspect is `w/h = 0.798832` |
+| Size | Free — `u`/`v` are normalised | Defaults to 2048×2048; bbox aspect is `w/h = 0.798832` |
 
 In EPSG:3857 metres the extent is
 `-1627293.369 … 5044402.235` x by `3628618.637 … 11980434.095` y.
@@ -268,13 +269,40 @@ In EPSG:3857 metres the extent is
 > off at 72.6°N. So would EPSG:4326 — in plate carrée the latitude grid lines are
 > evenly spaced, whereas here they must widen toward the north.
 
+### Size and aspect
+
+The default is **2048×2048** — power-of-two for the widest GPU compatibility.
+Non-power-of-two would also be legal here: GLES2 permits it when the wrap mode is
+`CLAMP_TO_EDGE` and the min filter is not mipmapped, which is exactly what
+`WeatherImageRenderer::Initialize()` sets.
+
+At 2048 wide the output resolves to about **1.9 km on the ground at 55°N**,
+against a 1 km source — so the pixels carry real detail rather than
+interpolation. Because the bbox aspect is 0.798832, a *square* texture resolves
+25 % less finely vertically (4078 vs 3258 Mercator m/px); `--isotropic` gives
+2048×2565 instead, which matches both axes at the cost of 4 MB more GPU memory.
+
+Cost on the device is the thing to watch, not bandwidth: `Update()` does
+`fromData` → `mirrored()` → `convertToFormat()`, each allocating a full copy, so
+a 2048² texture peaks near 64 MB transient per refresh against ~20 MB at
+1024×1282. Bandwidth is largely a non-issue because `PeriodicFile` issues a HEAD
+first and only fetches the body when `Last-Modified` advances — which does mean
+**the server must send a correct `Last-Modified` that changes on each publish**,
+or Nesis will never download the image at all.
+
+| Size | PNG | GPU texture | Ground res @55°N |
+|------|-----|-------------|------------------|
+| 1024×1282 | 316 KB | 5 MB | 3.7 km, isotropic |
+| **2048×2048** (default) | 776 KB | 16 MB | 1.9 × 2.3 km |
+| 2048×2565 (`--isotropic`) | 890 KB | 20 MB | 1.9 km, isotropic |
+
 ### Resampling
 
-The source is a 1 km grid and the target is roughly 3–4× coarser on the ground,
-so each output pixel takes the **strongest** of N×N sub-samples
-(`--supersample`, default 3) rather than a single nearest neighbour — the usual
-way radar products are reduced. At 1024 px wide this retains about 23 % more
-echo than plain nearest-neighbour.
+The source is a 1 km grid and the target is coarser on the ground, so each output
+pixel takes the **strongest** of N×N sub-samples (`--supersample`, default 3)
+rather than a single nearest neighbour — the usual way radar products are
+reduced. At 1024 px wide this retains about 23 % more echo than plain
+nearest-neighbour.
 
 Sub-samples are ranked by position along the source's own colour ramp, which the
 converter reads from the `Colormap` text chunk. Only whole source pixels are ever
@@ -291,17 +319,52 @@ and would paint a dark one. The converter therefore dilates opaque colours two
 rings outwards into transparent pixels, leaving alpha at zero. `--no-bleed`
 disables it.
 
+### Running it from cron
+
+`update_nesis_radar.sh` chains both steps and publishes the result:
+
+```cron
+*/5 * * * * /home/rok/src/wind/update_nesis_radar.sh >> /var/log/nesis-radar.log 2>&1
+```
+
+Output goes to `data/radar/eu/radar-1.png` (override with `$NESIS_RADAR_OUTPUT`).
+DBZH composites appear every 5 minutes, roughly 4 minutes after nominal time, and
+a run takes about 9 seconds.
+
+The wrapper is built around how Nesis actually fetches:
+
+- **Atomic publish.** The image is staged in the destination directory and moved
+  into place with a same-filesystem rename, so a reader never sees a partial
+  file. This matters more than it looks: `PeriodicFile` records the new
+  `Last-Modified` *before* handing the bytes over, and
+  `WeatherImageRenderer::Update()` silently drops an image that fails to decode —
+  so one torn read costs a whole cycle of stale radar, not one bad frame.
+- **Unchanged frames are not republished.** Rewriting an identical image would
+  bump `Last-Modified` and make every device in the field re-download it. The
+  script compares the composite's `NominalTime` against what is already
+  published and exits early, so it is safe to run more often than every
+  5 minutes.
+- **Failures leave the previous image in place** and exit non-zero, so cron
+  mails you rather than the display going blank.
+- **`flock`** stops a slow S3 fetch overlapping the next tick, and stale staging
+  files from a SIGKILL are swept after an hour.
+
+> The server must send a `Last-Modified` header that advances when the file
+> changes. Nesis issues a HEAD first and only downloads the body when that header
+> moves — if it is missing or static, the image is never fetched at all.
+
 ### CLI reference
 
 ```
 usage: nesis_radar_png.py [-h] [--output OUTPUT] [--width WIDTH]
-                          [--height HEIGHT] [--supersample SUPERSAMPLE]
-                          [--no-bleed] input
+                          [--height HEIGHT] [--isotropic]
+                          [--supersample SUPERSAMPLE] [--no-bleed] input
 
   input           Input PNG from opera_radar_map.py
   --output        Output PNG path                    (default: nesis_weather.png)
-  --width         Output width in pixels             (default: 1024)
-  --height        Output height in pixels            (default: width / 0.798832)
+  --width         Output width in pixels             (default: 2048)
+  --height        Output height in pixels            (default: same as --width)
+  --isotropic     Height = width / 0.798832, matching resolution on both axes
   --supersample   Strongest of N×N sub-samples       (default: 3; 1 = nearest)
   --no-bleed      Skip colour dilation into transparent pixels
 ```
