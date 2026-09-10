@@ -39,7 +39,9 @@ straight out of the Nesis sources:
                would show dark fringes.
 
   Size         Free — u/v are normalised, so any W×H is stretched onto the bbox.
-               The natural square-metre aspect is w/h = 0.798832.
+               Defaults to 2048×2048.  The bbox aspect is w/h = 0.798832, so a
+               square texture resolves 25% less finely in the vertical; pass
+               --isotropic for a matched 2048×2565 instead.
 
 Resampling
 ----------
@@ -59,7 +61,8 @@ Usage
   pip install pyproj pillow numpy
   python opera_radar_map.py --output opera_dbzh.png
   python nesis_radar_png.py opera_dbzh.png [--output nesis_weather.png]
-                            [--width 1024] [--height H] [--supersample 3]
+                            [--width 2048] [--height H | --isotropic]
+                            [--supersample 3]
 
 Dependencies
 ------------
@@ -84,8 +87,13 @@ NESIS_EAST = 45.314636273437486
 NESIS_SOUTH = 30.968189526345665
 NESIS_NORTH = 72.62025190354672
 
-# Natural aspect of the bbox in EPSG:3857 metres, used when --height is omitted.
+# Natural aspect of the bbox in EPSG:3857 metres.  The texture is stretched onto
+# the bbox regardless, so this only decides how detail is split between the axes:
+# a square texture spends 25% less resolution vertically than horizontally.
 NESIS_ASPECT = 0.798832
+
+# Default texture size.  Square and power-of-two for the widest GPU compatibility.
+DEFAULT_SIZE = 2048
 
 WEBMERCATOR = "EPSG:3857"
 WGS84 = "EPSG:4326"
@@ -109,14 +117,19 @@ def parse_args() -> argparse.Namespace:
         help="Output PNG file path (default: nesis_weather.png)"
     )
     p.add_argument(
-        "--width", type=int, default=1024,
-        help="Output width in pixels (default: 1024)"
+        "--width", type=int, default=DEFAULT_SIZE,
+        help=f"Output width in pixels (default: {DEFAULT_SIZE})"
     )
     p.add_argument(
         "--height", type=int, default=None,
+        help="Output height in pixels (default: same as --width, i.e. square)"
+    )
+    p.add_argument(
+        "--isotropic", action="store_true",
         help=(
-            f"Output height in pixels (default: width / {NESIS_ASPECT}, the "
-            "natural square-metre aspect of the bounding box)"
+            f"Set the height to width / {NESIS_ASPECT} so the output resolves "
+            "equally in both axes. A square texture is stretched onto a bbox "
+            "that is not square, so it resolves 25% less finely vertically."
         ),
     )
     p.add_argument(
@@ -401,7 +414,12 @@ def main() -> None:
         sys.exit(f"--width must be positive, got {args.width}.")
     if args.supersample < 1:
         sys.exit(f"--supersample must be at least 1, got {args.supersample}.")
-    height = args.height if args.height else round(args.width / NESIS_ASPECT)
+    if args.height:
+        height = args.height
+    elif args.isotropic:
+        height = round(args.width / NESIS_ASPECT)
+    else:
+        height = args.width
     if height < 1:
         sys.exit(f"--height must be positive, got {height}.")
 
@@ -443,6 +461,9 @@ def main() -> None:
         "AlphaBleed":   "none" if args.no_bleed else "2 rings of colour dilation",
         "GridSize":     grid_size,
         "Supersample":  str(args.supersample),
+        "PixelAspect":  ("isotropic" if abs(args.width / height - NESIS_ASPECT) < 1e-4
+                         else f"{(args.width / height) / NESIS_ASPECT:.4f}× wider than tall "
+                              "in resolution terms"),
         "SourceImage":  Path(args.input).name,
         "SourceProjection": meta["projdef"],
         "NominalTime":  text.get("NominalTime", ""),
