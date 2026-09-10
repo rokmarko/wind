@@ -40,7 +40,7 @@ Usage
 -----
   pip install h5py pillow numpy requests
   python opera_radar_map.py [--output opera_dbzh.png] [--scale 2]
-                            [--min-dbz 5] [--show-coverage]
+                            [--min-dbz 5] [--show-coverage [covered|uncovered]]
                             [--time YYYYMMDDTHHMM] [--list]
 
 Dependencies
@@ -96,9 +96,13 @@ DBZ_COLOUR_STOPS: tuple[tuple[float, tuple[int, int, int]], ...] = (
 # so faint echo fades in instead of appearing with a hard edge.
 ALPHA_RAMP_DBZ = 5.0
 
-# Tint used by --show-coverage for in-coverage-but-dry pixels.
-COVERAGE_RGB = (60, 60, 70)
-COVERAGE_ALPHA = 20
+# Tints used by --show-coverage.  The two variants mark opposite things, so they
+# get different hues: somebody holding both images should not have to remember
+# which grey meant what.
+COVERED_RGB = (60, 60, 70)          # radar sees here, it is simply not raining
+COVERED_ALPHA = 20
+UNCOVERED_RGB = (74, 56, 56)        # no radar here — absence of echo means nothing
+UNCOVERED_ALPHA = 20
 
 
 # ---------------------------------------------------------------------------
@@ -137,10 +141,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
-        "--show-coverage", action="store_true",
+        "--show-coverage", nargs="?", const="covered", default=None,
+        choices=["covered", "uncovered"],
         help=(
-            "Tint in-coverage-but-dry pixels faintly so the radar network "
-            "footprint is visible, distinguishing 'no rain' from 'no radar'."
+            "Faintly tint one side of the radar footprint, so that 'no rain' "
+            "can be told apart from 'no radar'. 'covered' (the default when the "
+            "flag is given bare) tints in-coverage-but-dry pixels, showing where "
+            "the network reaches; 'uncovered' inverts that and tints the gaps "
+            "instead, showing where an empty map means nothing was looked at."
         ),
     )
     p.add_argument(
@@ -390,7 +398,7 @@ def colorize_dbzh(
     nodata_mask: np.ndarray,
     undetect_mask: np.ndarray,
     min_dbz: float,
-    show_coverage: bool = False,
+    show_coverage: str | None = None,
 ) -> np.ndarray:
     """
     Map reflectivity to the NWS colour scale and build the alpha channel.
@@ -398,6 +406,10 @@ def colorize_dbzh(
     Returns uint8 array of shape (H, W, 4).  Alpha is 0 wherever there is no
     coverage, nothing was detected, or the echo is below *min_dbz*; it ramps in
     over the next ALPHA_RAMP_DBZ dB so faint echo has no hard edge.
+
+    *show_coverage* optionally tints one of the two transparent states:
+    'covered' marks in-coverage-but-dry pixels, 'uncovered' marks the gaps in
+    the network.  Either way the echo itself is untouched.
     """
     stops = np.array([s for s, _ in DBZ_COLOUR_STOPS], dtype=np.float32)
     colours = np.array([c for _, c in DBZ_COLOUR_STOPS], dtype=np.float32)
@@ -417,9 +429,12 @@ def colorize_dbzh(
     alpha[blank] = 0.0
     rgba[..., 3] = alpha.astype(np.uint8)
 
-    if show_coverage:
-        rgba[undetect_mask, 0:3] = COVERAGE_RGB
-        rgba[undetect_mask, 3] = COVERAGE_ALPHA
+    if show_coverage == "covered":
+        rgba[undetect_mask, 0:3] = COVERED_RGB
+        rgba[undetect_mask, 3] = COVERED_ALPHA
+    elif show_coverage == "uncovered":
+        rgba[nodata_mask, 0:3] = UNCOVERED_RGB
+        rgba[nodata_mask, 3] = UNCOVERED_ALPHA
 
     return rgba
 
@@ -502,6 +517,7 @@ def main() -> None:
         "GridSize":     f"{rgba.shape[1]}x{rgba.shape[0]}",
         "PixelSize_m":  f"{meta['xscale'] * args.scale:.0f}",
         "MinDBZ":        str(args.min_dbz),
+        "CoverageTint":  args.show_coverage or "none",
         "Colormap":      ramp,
         "RadarNodes":    str(meta["node_count"]),
         "SourceURL":    f"{BUCKET_URL}/{key}",

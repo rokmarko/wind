@@ -157,6 +157,9 @@ python opera_radar_map.py
 # Half resolution, with the radar network footprint faintly visible
 python opera_radar_map.py --scale 2 --show-coverage --output radar_2km.png
 
+# Same, but tinting the gaps in the network instead of its footprint
+python opera_radar_map.py --scale 2 --show-coverage uncovered --output radar_gaps.png
+
 # One specific frame from the 24-hour cache
 python opera_radar_map.py --time 20260910T0900
 
@@ -215,8 +218,24 @@ distinction:
 |--------------|---------------|-------|
 | Echo ≥ `--min-dbz` | ~6 % | 255 (ramping in over the first 5 dB) |
 | Detected but below threshold | — | 0 |
-| `undetect` — in coverage, dry | ~41 % | 0, or a faint tint with `--show-coverage` |
-| `nodata` — outside radar coverage | ~49 % | 0 |
+| `undetect` — in coverage, dry | ~41 % | 0, or a faint tint with `--show-coverage covered` |
+| `nodata` — outside radar coverage | ~49 % | 0, or a faint tint with `--show-coverage uncovered` |
+
+`--show-coverage` exists because a transparent pixel is ambiguous: it means
+either "the radar looked and saw nothing" or "no radar looked here", and those
+are very different things to a pilot. The flag tints one of the two so they can
+be told apart, and takes an optional argument choosing which:
+
+- **`covered`** (also what a bare `--show-coverage` means) tints the
+  in-coverage-but-dry area, drawing the network's footprint — you can see the
+  individual radar range circles.
+- **`uncovered`** inverts it and tints the gaps instead, marking the ground
+  where an empty map means nothing was looked at.
+
+The two use different hues (cool grey and warm grey) so the images can't be
+confused for one another, and both leave the echo itself untouched — it is
+bit-identical with or without the flag, all the way through
+`nesis_radar_png.py`.
 
 `--min-dbz` defaults to **5.0**, which suppresses clutter and clear-air noise.
 `--scale N` reduces the grid by an integer factor using a block **maximum**, not
@@ -226,13 +245,16 @@ a mean, so storm cores are not averaged away.
 
 ```
 usage: opera_radar_map.py [-h] [--output OUTPUT] [--time TIME] [--scale SCALE]
-                          [--min-dbz MIN_DBZ] [--show-coverage] [--list]
+                          [--min-dbz MIN_DBZ]
+                          [--show-coverage [{covered,uncovered}]] [--list]
 
   --output          Output PNG path                     (default: opera_dbzh.png)
   --time            Specific frame, YYYYMMDDTHHMM       (default: newest available)
   --scale           Integer block-max reduction factor  (default: 1 = native 1 km)
   --min-dbz         Transparent below this reflectivity (default: 5.0 dBZ)
-  --show-coverage   Tint in-coverage-but-dry pixels so the footprint is visible
+  --show-coverage   Tint one side of the footprint: 'covered' (the default when
+                    given bare) marks in-coverage-but-dry ground, 'uncovered'
+                    marks the gaps in the network
   --list            List available timestamps and exit
 ```
 
