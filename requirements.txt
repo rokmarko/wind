@@ -10,6 +10,7 @@ eckitlib==2.0.3.14
 ecmwf-opendata==0.3.26
 fckitlib==0.14.2.14
 findlibs==0.1.2
+h5py==3.16.0
 idna==3.11
 multiurl==0.3.7
 numpy==2.4.3

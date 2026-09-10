@@ -401,7 +401,8 @@ def save_png(rgb: np.ndarray, out_path: str, meta: dict) -> None:
     except ImportError:
         sys.exit("Pillow is not installed.\nRun:  pip install pillow")
 
-    img = Image.fromarray(rgb, mode="RGB")
+    mode = "RGBA" if rgb.ndim == 3 and rgb.shape[2] == 4 else "RGB"
+    img = Image.fromarray(rgb, mode=mode)
 
     # Embed encoding metadata in the PNG text chunks
     pnginfo = PngImagePlugin.PngInfo()
