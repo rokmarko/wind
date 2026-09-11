@@ -64,7 +64,7 @@ if [ -n "$NEW_TS" ] && [ "$NEW_TS" = "$CUR_TS" ]; then
 fi
 
 log "converting to Nesis texture"
-"$PYTHON" nesis_radar_png.py "$WORK/opera_dbzh.png" --output "$STAGE --supersample 1"
+"$PYTHON" nesis_radar_png.py "$WORK/opera_dbzh.png" --output "$STAGE" --supersample 1
 
 chmod 644 "$STAGE"          # mktemp makes it 0600; the web server must read it
 mv -f "$STAGE" "$OUTPUT"
