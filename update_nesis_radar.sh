@@ -19,7 +19,7 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT="${NESIS_RADAR_OUTPUT:-$REPO/data/radar/eu/radar-1.png}"
-PYTHON="$REPO/.venv/bin/python"
+PYTHON="$REPO/venv/bin/python"
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 

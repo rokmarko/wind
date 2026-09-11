@@ -349,6 +349,15 @@ def odim_to_array(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]
     return values, nodata_mask, undetect_mask, meta
 
 
+def odim_epoch(date: str, time: str) -> str:
+    """Seconds since the Unix epoch for an ODIM YYYYMMDD / HHMMSS pair ("" if unparsable)."""
+    try:
+        t = datetime.datetime.strptime(f"{date}{time:0<6}", "%Y%m%d%H%M%S")
+    except ValueError:
+        return ""
+    return str(int(t.replace(tzinfo=datetime.timezone.utc).timestamp()))
+
+
 # ---------------------------------------------------------------------------
 # Optional block reduction
 # ---------------------------------------------------------------------------
@@ -506,6 +515,7 @@ def main() -> None:
         "ProdName":      meta["prodname"],
         "Product":       meta["quantity"],
         "NominalTime":  f"{meta['date']}T{meta['time']}Z",
+        "NominalTS":     odim_epoch(meta["date"], meta["time"]),
         "StartTime":    f"{meta['startdate']}T{meta['starttime']}Z",
         "EndTime":      f"{meta['enddate']}T{meta['endtime']}Z",
         "Projection":    meta["projdef"],

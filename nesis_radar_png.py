@@ -467,6 +467,7 @@ def main() -> None:
         "SourceImage":  Path(args.input).name,
         "SourceProjection": meta["projdef"],
         "NominalTime":  text.get("NominalTime", ""),
+        "NominalTS":    text.get("NominalTS", ""),
         "Product":      text.get("Product", ""),
         "Colormap":     meta["colormap"],
         "SourceURL":    text.get("SourceURL", ""),
