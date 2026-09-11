@@ -50,7 +50,7 @@ trap 'rm -rf "$WORK"; rm -f "$STAGE"' EXIT
 cd "$REPO"
 
 log "fetching OPERA composite"
-"$PYTHON" opera_radar_map.py --output "$WORK/opera_dbzh.png"
+"$PYTHON" opera_radar_map.py --output "$WORK/opera_dbzh.png" --show-coverage uncovered
 
 # Republishing an unchanged frame bumps Last-Modified, and every Nesis in the
 # field would then re-download the same image. Skip instead, so this stays safe
@@ -64,7 +64,7 @@ if [ -n "$NEW_TS" ] && [ "$NEW_TS" = "$CUR_TS" ]; then
 fi
 
 log "converting to Nesis texture"
-"$PYTHON" nesis_radar_png.py "$WORK/opera_dbzh.png" --output "$STAGE"
+"$PYTHON" nesis_radar_png.py "$WORK/opera_dbzh.png" --output "$STAGE --supersample 1"
 
 chmod 644 "$STAGE"          # mktemp makes it 0600; the web server must read it
 mv -f "$STAGE" "$OUTPUT"
